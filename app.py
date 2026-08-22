@@ -51,6 +51,17 @@ CENSUS_CSV = HERE / "aggregate_by_generator_relint_2026-08-17.csv"
 ACCEPTED = [".glb", ".gltf", ".obj", ".ply", ".stl", ".usd", ".usda", ".usdc", ".usdz"]
 MAX_MB = 100
 
+# The only contact route on this page, and the only way this surface can move
+# `F` in PATHB_LEDGER. `F` counts a file a stranger sent TO A PERSON, and a
+# run of the app is not that (see _emit_run). Email rather than a GitHub
+# issue on purpose: a person with a broken proprietary asset will not attach
+# it to a public issue tracker, and the reply from a human is the thing being
+# measured. One constant so the route is one line to change.
+# ⛔ It is shown ONLY on READ_FAILURE and UNVERIFIED. Those are the two cases
+#    where we actually want the file, and a page whose credibility rests on
+#    not selling does not put an ask under a clean result.
+CONTACT = "alzastrategy@gmail.com"
+
 # ⛔ THE HEADLINE VERDICT COMES FROM `cert["verdict"]`. DO NOT RE-DERIVE IT.
 #
 # The engine already emits PASS / FAIL / UNVERIFIED and it is the source of
@@ -187,6 +198,46 @@ than it says.
 """
 
 
+# ------------------------------------------------------------------ the counter
+
+# THE RUN COUNTER. `SESSION_HANDOFF_2026-08-22b` section 15.
+#
+# The surface went live on 2026-08-22 and could not move the metric it was
+# built for: `PATHB_LEDGER` grades this project on files received from
+# strangers, and a page that retains nothing produces no record at all. A
+# hundred people could run broken meshes through it in a week and the ledger
+# would still read 0.
+#
+# This is the whole fix: one line to stdout per completed run. Streamlit
+# Community Cloud keeps app logs, so it is a counter with zero storage.
+#
+# WHAT THIS LINE MAY NEVER CARRY, and the reason is the product, not the law:
+#    the filename, any file bytes, the sha256, the byte size, an IP, a session
+#    id, or anything else that could identify a visitor or their asset. Verdict,
+#    file extension, face count and wall time. Nothing else, ever. If you are
+#    tempted to add a field here, change the page copy in the same commit or do
+#    not add it.
+#
+# A RUN IS NOT AN `F`. `F` is a file a stranger SENT TO A PERSON; this counts
+#    anonymous engagement. Do not let these lines be totalled into the `F`
+#    column, which is precisely the metric drift `PATH_B` section 3 built the
+#    throttle to prevent.
+#
+# AND IT UNDERCOUNTS, BY DESIGN. `check_bytes` is `@st.cache_data`, so a second
+#    run of identical bytes is a cache hit and prints nothing. One line is one
+#    distinct asset linted by one server process, not one upload click. The
+#    cache holds 8 entries and dies with the process, so the undercount is
+#    small and always in the conservative direction. Read the total as a floor.
+def _emit_run(verdict: str, suffix: str, faces, ms) -> None:
+    """One line per completed run, to the app log. See the block above."""
+    print(
+        f"RUN verdict={verdict} suffix={suffix or 'none'} "
+        f"faces={'na' if faces is None else faces} "
+        f"ms={'na' if ms is None else round(ms)}",
+        flush=True,
+    )
+
+
 # ------------------------------------------------------------------ the linter
 
 def _findings(cert: dict) -> list[dict]:
@@ -218,18 +269,22 @@ def _plain(text: str) -> str:
 @st.cache_data(show_spinner=False, max_entries=8)
 def check_bytes(name: str, data: bytes) -> tuple[str, str | None]:
     """Lint uploaded bytes. Returns (markdown report, certificate JSON or None)."""
+    suffix = Path(name).suffix.lower()
+
     if gl is None:
+        _emit_run("ENGINE_MISSING", suffix, None, None)
         return ("### Engine not installed\n\n`geometry_linter` did not import. "
                 "`requirements.txt` should install the 3dqa wheel from the "
                 "GitHub Release. Check the app logs."), None
 
-    suffix = Path(name).suffix.lower()
     if suffix not in ACCEPTED:
+        _emit_run("UNSUPPORTED", suffix, None, None)
         return (f"### Unsupported file type `{suffix}`\n\n"
                 f"Accepted: {', '.join(ACCEPTED)}"), None
 
     size_mb = len(data) / 1e6
     if size_mb > MAX_MB:
+        _emit_run("TOO_LARGE", suffix, None, None)
         return (f"### File too large\n\n{size_mb:.1f} MB, limit {MAX_MB} MB "
                 f"here. The CLI has no limit."), None
 
@@ -241,16 +296,28 @@ def check_bytes(name: str, data: bytes) -> tuple[str, str | None]:
     try:
         cert = gl.lint_file(tmp_path)
     except Exception:
+        _emit_run("READ_FAILURE", suffix, None,
+                  (time.perf_counter() - t0) * 1000)
         return ("### The engine could not read this file\n\n"
                 "That is a real answer and we would like to know about it.\n\n"
                 "```\n" + _plain(traceback.format_exc(limit=3)) + "```\n\n"
-                "⚠️ This is a failure to measure, **not** a clean result."), None
+                "⚠️ This is a failure to measure, **not** a clean result.\n\n"
+                "A file this engine cannot read is worth more to us than one "
+                "it can. Send it to " + CONTACT + " and it becomes a "
+                "regression test, and you get back whatever we learn from "
+                "it."), None
     finally:
         try:
             Path(tmp_path).unlink()
         except OSError:
             pass
     wall = (time.perf_counter() - t0) * 1000
+
+    # From the certificate, never re-derived. Same rule as the verdict
+    # below: the engine is the source of truth, and `faces` is None on a
+    # point cloud, which is why _emit_run prints `na` rather than 0.
+    _emit_run(str(cert.get("verdict", "")).upper() or "UNRECOGNISED",
+              suffix, (cert.get("geometry") or {}).get("faces"), wall)
 
     fs = _findings(cert)
     failed = [f for f in fs if not f.get("passed")]
@@ -296,6 +363,14 @@ def check_bytes(name: str, data: bytes) -> tuple[str, str | None]:
         lines += [f"**Checks that passed ({len(clean)}):** "
                   + ", ".join(str(f.get("code")) for f in clean), ""]
 
+    if raw == "UNVERIFIED":
+        lines += ["⛔ **This is not a pass and it is not a fail.** The "
+                  "engine declined to measure this asset, which is a "
+                  "result about our instrument, not about your file. If "
+                  "you think it should have been measurable, send it to "
+                  + CONTACT + ". An asset that defeats the linter is the "
+                  "single most useful thing anyone can give us.", ""]
+
     lines += ["---", "",
               "**What this does not tell you.** It has no opinion on whether "
               "the topology is *good*, only on whether it is *valid*. "
@@ -304,8 +379,13 @@ def check_bytes(name: str, data: bytes) -> tuple[str, str | None]:
               "And if you are 3D printing, your STL export erases most of what "
               "is flagged here: our checker and PrusaSlicer disagreed on 82 of "
               "120 identical files after the same export.", "",
-              "Full certificate below. No account, nothing retained beyond this "
-              "request, and nothing is sent anywhere."]
+              "Full certificate below. No account, and your file is never "
+              "stored: the bytes live in a temporary file for the length "
+              "of this lint and are deleted before you see this page. One "
+              "line per run goes to our server log, so we can tell the "
+              "tool is being used: the verdict, the file extension, the "
+              "face count and the milliseconds. No filename, no file "
+              "contents, no checksum, nothing that identifies you."]
 
     return "\n".join(lines), json.dumps(cert, indent=2)
 
@@ -415,7 +495,7 @@ st.set_page_config(page_title="3D asset geometry check", page_icon="🔍",
 st.title("3D asset geometry check")
 st.markdown(
     "Drop a mesh. Get the defect list, the checks that could not run, and the "
-    "raw certificate. Free, no account, nothing kept.\n\n"
+    "raw certificate. Free, no account, your file is never stored.\n\n"
     "*Same engine, same thresholds, as the census in the second tab.*")
 
 tab_check, tab_census, tab_limits = st.tabs(
@@ -432,6 +512,11 @@ with tab_check:
             f"Accepted: {', '.join(ACCEPTED)} · up to {MAX_MB} MB. "
             "Large or unusual files are the interesting ones. If it breaks, "
             "that is a finding and we want it.")
+        st.caption(
+            "**What we keep.** Not your file. One line per run in the "
+            "server log: verdict, file extension, face count, "
+            "milliseconds. That is the whole record, and it exists so we "
+            "know whether anyone is using this.")
     with right:
         if up is None:
             st.markdown("Drop a file to start.")
