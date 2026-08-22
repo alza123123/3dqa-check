@@ -101,7 +101,8 @@ FINDING_10 = (
     "from the *concatenated* mesh. When `trimesh` fails to pack a texture atlas "
     "it swallows the exception and returns a mesh with no UVs, which this "
     "engine then reports as a missing-UV defect. On a multi-material asset "
-    "this finding may be a false positive."
+    "this finding may be a false positive. The limitations tab has a "
+    "two-line check that settles it."
 )
 
 
@@ -164,25 +165,25 @@ def census_summary() -> str:
     healed = round(float(o["heal_full"]) * fails)
     regr = int(o["n_introduced_regressions"])
     return f"""
-### The census — {n:,} assets, 23 generators, one instrument
+### The census: {n:,} assets, 23 generators, one instrument
 
 Re-linted 2026-08-17. Every figure below is a count over a stated denominator,
 on purpose: a fragment of this text cannot be quoted into something stronger
 than it says.
 
 - **{measured:,} of {n:,}** assets were measurable. The other **{unmeasurable}** are
-  point clouds with no faces — they are reported UNVERIFIED, **not** as passes.
+  point clouds with no faces. They are reported UNVERIFIED, **not** as passes.
 - **{passed:,} of {measured:,}** measured assets pass every check.
 - **{nw:,} of {measured:,}** are not watertight.
 - **{nm:,} of {measured:,}** carry at least one non-manifold edge. ⚠️ *At least
   one.* The median affected model carries **4**, on meshes that often exceed a
   million faces. A percentage quoted without that magnitude reads as "a third of
   this generator's output is unusable", which this data does not say.
-- Of the **{fails:,}** that failed, **{healed:,}** heal fully — and repair
+- Of the **{fails:,}** that failed, **{healed:,}** heal fully, and repair
   introduced a regression on **{regr}** of them. We publish that number because
   a repair tool that cannot tell you when it made things worse is not a QA tool.
 
-⛔ **No UV rate is published.** FINDING-10 is open — see the limitations tab.
+⛔ **No UV rate is published.** FINDING-10 is open. See the limitations tab.
 """
 
 
@@ -192,12 +193,35 @@ def _findings(cert: dict) -> list[dict]:
     return cert.get("findings", cert.get("checks", [])) or []
 
 
+# The engine writes its own defect messages and 76 lines of geometry_linter.py
+# plus 50 of repair_engine.py contain an em dash. No em dash is wanted in any
+# text this app renders, so displayed messages are normalised here.
+# ⛔ PUNCTUATION ONLY, and the certificate is never touched: the JSON a visitor
+# downloads keeps the engine's exact bytes, so nothing that carries meaning can
+# drift between the page and the artifact. Fix it at the source in 1.1.2 and
+# this function becomes a no-op.
+def _plain(text: str) -> str:
+    return (str(text or "")
+            .replace(" — ", ", ")
+            .replace("—", ",")
+            .replace(" – ", ", ")
+            .replace("–", "-"))
+
+
+# ⛔ Cached on the file's bytes. Streamlit re-runs the whole script on EVERY
+# widget interaction, so without this the asset is re-linted when the visitor
+# expands the raw certificate or clicks download. Found 2026-08-22 on the live
+# app: the page displayed 302 ms while the downloaded certificate recorded
+# 507.82 ms, because they were two separate lints of the same bytes. Two
+# different numbers for one upload is exactly the kind of thing this product
+# cannot afford to show a stranger.
+@st.cache_data(show_spinner=False, max_entries=8)
 def check_bytes(name: str, data: bytes) -> tuple[str, str | None]:
     """Lint uploaded bytes. Returns (markdown report, certificate JSON or None)."""
     if gl is None:
         return ("### Engine not installed\n\n`geometry_linter` did not import. "
                 "`requirements.txt` should install the 3dqa wheel from the "
-                "GitHub Release — check the app logs."), None
+                "GitHub Release. Check the app logs."), None
 
     suffix = Path(name).suffix.lower()
     if suffix not in ACCEPTED:
@@ -219,7 +243,7 @@ def check_bytes(name: str, data: bytes) -> tuple[str, str | None]:
     except Exception:
         return ("### The engine could not read this file\n\n"
                 "That is a real answer and we would like to know about it.\n\n"
-                "```\n" + traceback.format_exc(limit=3) + "```\n\n"
+                "```\n" + _plain(traceback.format_exc(limit=3)) + "```\n\n"
                 "⚠️ This is a failure to measure, **not** a clean result."), None
     finally:
         try:
@@ -236,14 +260,14 @@ def check_bytes(name: str, data: bytes) -> tuple[str, str | None]:
     # Authoritative. See the comment on UNMEASURED_CHECKS above.
     raw = str(cert.get("verdict", "")).upper()
     if raw == "UNVERIFIED":
-        verdict = ("⚠️ UNVERIFIED — the engine could not measure this, "
+        verdict = ("⚠️ UNVERIFIED: the engine could not measure this, "
                    "which is not the same as clean")
     elif raw == "PASS":
-        verdict = f"PASS — {len(fs)} of {len(fs)} checks clean"
+        verdict = f"PASS: {len(fs)} of {len(fs)} checks clean"
     elif raw == "FAIL":
-        verdict = f"FAIL — {len(defects)} of {len(fs)} checks found a defect"
+        verdict = f"FAIL: {len(defects)} of {len(fs)} checks found a defect"
     else:
-        verdict = (f"⚠️ UNVERIFIED — the engine returned an unrecognised "
+        verdict = (f"⚠️ UNVERIFIED: the engine returned an unrecognised "
                    f"verdict ({raw or 'none'}), so nothing is claimed here")
 
     lines = [f"## {verdict}", "",
@@ -255,14 +279,14 @@ def check_bytes(name: str, data: bytes) -> tuple[str, str | None]:
                   "could not produce an answer, and are reported as absent "
                   "measurements rather than passes.", ""]
         for f in unmeasured:
-            lines.append(f"- **{f.get('code')}** — {f.get('message','')}")
+            lines.append(f"- **{f.get('code')}**: {_plain(f.get('message'))}")
         lines.append("")
 
     if defects:
         lines += ["### Defects found", ""]
         for f in defects:
-            lines.append(f"- **{f.get('code')}** ({f.get('severity')}) — "
-                         f"{f.get('message','')}")
+            lines.append(f"- **{f.get('code')}** ({f.get('severity')}): "
+                         f"{_plain(f.get('message'))}")
             if f.get("code") == "UV_MISSING":
                 lines += ["", f"  {FINDING_10}", ""]
         lines.append("")
@@ -274,7 +298,7 @@ def check_bytes(name: str, data: bytes) -> tuple[str, str | None]:
 
     lines += ["---", "",
               "**What this does not tell you.** It has no opinion on whether "
-              "the topology is *good* — only on whether it is *valid*. "
+              "the topology is *good*, only on whether it is *valid*. "
               "Retopology quality, UV layout quality, whether the model looks "
               "right, and every texture-class defect are all invisible to it. "
               "And if you are 3D printing, your STL export erases most of what "
@@ -287,22 +311,47 @@ def check_bytes(name: str, data: bytes) -> tuple[str, str | None]:
 
 
 LIMITS = """
-## What this gets wrong
+## What it gets wrong and leaves out
 
 A benchmark that only publishes its wins is marketing. This is the list we
 would rather you read first.
 
-### FINDING-10 — open, 2026-08-21
+Two different things are below and they are not the same. **Wrong** is where
+this reports something untrue: a check that fires when it should not, or a
+number we published and withdrew. **Blind** is where it never looks at all, and
+never claims to. A false positive and an absent opinion are different failures,
+and you should know which one you are reading.
+
+### Wrong: FINDING-10, open since 2026-08-21
 `UV_MISSING` is read from the **concatenated** mesh. `trimesh.util.concatenate`
 wraps its visual merge in `except BaseException` and logs at DEBUG, so when a
-texture-atlas pack fails it silently returns a mesh with no UVs — which this
+texture-atlas pack fails it silently returns a mesh with no UVs, which this
 engine reports as a *measured defect*. One asset in a 149-asset contrast group
 flipped between two runs with identical bytes because of this.
 
 **No UV rate is published anywhere while this is open**, and every per-file
 UV finding carries the caveat inline.
 
-### The instrument disagrees with slicers
+**What to do about it.** The mechanism only fires when more than one primitive
+has to be merged, and it does not fire every time: a two-primitive test asset
+with UVs on both reports `UV_OK` correctly. So a single-primitive file is not
+affected, and a multi-primitive one is worth checking rather than assuming. This
+settles it in ten seconds, because it reads each primitive *before* the merge
+that loses them:
+
+```python
+import trimesh
+s = trimesh.load("yourfile.glb")
+geoms = s.geometry if hasattr(s, "geometry") else {"mesh": s}
+for name, g in geoms.items():
+    uv = getattr(g.visual, "uv", None)
+    print(name, "has UVs:", uv is not None and len(uv) > 0)
+```
+
+If every primitive prints `True` and we said `UV_MISSING`, the finding is ours,
+not yours. Send it and it becomes a test case.
+
+### Blind: the instrument does not know where your file is going
 Our checker and PrusaSlicer disagree on **82 of 120** identical files after the
 same export. If your pipeline ends in a slicer, most of what this flags is
 erased by your own STL export before it reaches the printer. **Non-manifold
@@ -310,26 +359,51 @@ geometry is a real defect for anyone consuming glTF directly and close to a
 non-issue for 3D printing.** Same file, opposite verdict, depending on where it
 is going.
 
-### Repair can make things worse
+**What to do about it.** Check the file your pipeline actually ships, not the
+one it starts from. If you export to STL before printing, export first and drop
+*that* file here, then judge against the result. If you ship glTF or USD to an
+engine or a viewer, check the source file and take non-manifold edges seriously.
+
+### Wrong: repair can make things worse
 Across the **1,461** assets that failed lint, repair introduced a regression on
 **312** of them. The engine reverts a repair that would introduce a defect
 rather than shipping it, and the report names every one.
 
-### It has no opinion on quality
+**What to do about it.** Never let a repair write over anything you have not
+read first. `3dqa heal --dry-run` computes the whole repair and writes nothing,
+and its `introduced` list is the answer to "would this make my asset worse".
+Read that list, then decide. On a batch, dry-run the batch and sort by it.
+
+### Blind: it has no opinion on quality
 Valid is not good. Edge flow, topology suitable for deformation, sensible UV
-layout, whether the asset looks like what it claims to be — none of it is
+layout, whether the asset looks like what it claims to be. None of it is
 measured here.
 
-### Numbers we retired
+**What to do about it: nothing we can offer.** This one has no workaround and we
+are not going to invent one. A person who knows your pipeline has to look at the
+asset. A clean certificate from this tool means structurally valid, and that is
+all it has ever meant.
+
+### Wrong: numbers we published and withdrew
 Two headline figures were published and are now withdrawn: the check that
 produced them counted holes as something other than boundary edges (FINDING-7).
 The corrected figures are 33.7% and 70.5%. Both retired strings are blocked by
 an automated gate in the repo so they cannot reappear by accident.
 
-### Scope
+**What to do about it.** If you quoted either of the old figures anywhere,
+correct it. And audit the rest of this page while you are here: every number on
+it is a count over a stated denominator for exactly that reason, so you can
+check any of them without asking us.
+
+### Blind: scope
 2,307 assets from 23 generators, sourced from the 3D Arena dataset on Hugging
 Face. It is one corpus, one instrument, one point in time. It is not a claim
 about any generator's current release.
+
+**What to do about it.** The corpus is whatever 3D Arena happened to contain, so
+it says nothing about your files. Send a batch of your own and it gets run, and
+you get the per-asset rows back. We are more interested in the files that fail
+than the ones that do not.
 """
 
 
@@ -345,7 +419,7 @@ st.markdown(
     "*Same engine, same thresholds, as the census in the second tab.*")
 
 tab_check, tab_census, tab_limits = st.tabs(
-    ["Check a file", "The census", "What this gets wrong"])
+    ["Check a file", "The census", "What it gets wrong and leaves out"])
 
 with tab_check:
     left, right = st.columns([1, 2])
@@ -356,7 +430,7 @@ with tab_check:
             accept_multiple_files=False)
         st.caption(
             f"Accepted: {', '.join(ACCEPTED)} · up to {MAX_MB} MB. "
-            "Large or unusual files are the interesting ones — if it breaks, "
+            "Large or unusual files are the interesting ones. If it breaks, "
             "that is a finding and we want it.")
     with right:
         if up is None:
@@ -388,7 +462,7 @@ with tab_census:
         hide_index=True, width='stretch')
     st.markdown(
         "⚠️ **Three generators show `not measured`.** `404_GEN`, `LGM` and "
-        "`SAM-3D-Objects-3DGS` ship point clouds with no faces — 101 each. "
+        "`SAM-3D-Objects-3DGS` ship point clouds with no faces, 101 each. "
         "There is nothing to measure, so they get no score. They are **not** a "
         "zero.\n\n"
         f"⛔ **{len(EMBARGOED)} generator rows are measured but withheld.** We "
@@ -396,7 +470,7 @@ with tab_census:
         "they had a chance to look at it, and they have not said they are done. "
         "The commitment has no expiry date, so neither does the hold. Their "
         "assets are still counted in the totals above. We would rather show you "
-        "a gap than break a promise — and you should weigh what that implies "
+        "a gap than break a promise, and you should weigh what that implies "
         "about the rows we *do* show.\n\n"
         "Want your generator measured, or think a row is wrong? Send a batch "
         "and it gets run. A corrected row is worth more to us than a "
