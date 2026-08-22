@@ -1,0 +1,31 @@
+# Streamlit Community Cloud runtime.
+#
+# ⭐ The engine is INSTALLED, never vendored. ⛔ No engine source belongs in this
+#    repo: LICENSE names geometry_linter.py / qa_profiles.py / usd_loader.py,
+#    and putting them in a public repo gives away the source-available moat.
+#    Running the wheel here is USE, not redistribution — LICENSE §1.
+#
+# ⚠️ From a GitHub Release, not PyPI, and deliberately. The PyPI account went
+#    into recovery 2026-08-22 while 1.1.0 sat gated-green (make cov 464 passed /
+#    94.75% at 9f7e2b4; verify_release.py exit 0 at fa466f0, 24 of 24 rows).
+#    Publishing our own wheel to our own public repo is the same act as the
+#    PyPI upload: LICENSE §2 binds licensees, §3 keeps every right with the
+#    copyright holder.
+#
+# ⛔ Do NOT fall back to 3dqa==1.0.0. It is pre-FINDING-7 and still measures the
+#    two rates this project RETRACTED. It would make the "Check a file" tab
+#    contradict the census tab beside it.
+#
+# When PyPI is recovered, upload the identical wheel and swap this for
+# `3dqa==1.1.0`. The Release then becomes a mirror, not a fork.
+3dqa @ https://github.com/alza123123/3dqa-benchmark/releases/download/v1.1.0/3dqa-1.1.0-py3-none-any.whl
+
+streamlit==1.62.0
+
+# Pinned to the repo's own requirements.txt so this surface and the census are
+# the same instrument. Do not float them.
+trimesh==4.5.3
+numpy==2.1.3
+networkx==3.4.2
+pillow==12.3.0
+scipy==1.13.1
