@@ -578,14 +578,14 @@ than the ones that do not.
 #     so nothing could tie the census to the thing you install.
 # ⛔ No number here. Every rate on this page is read from the engine at runtime;
 # a figure typed into the header would be a figure nobody re-checks.
-st.set_page_config(page_title="Topoheal — 3D asset geometry check",
+st.set_page_config(page_title="Topoheal: 3D asset geometry check",
                    page_icon="🔍", layout="wide")
 
 st.title("3D asset geometry check")
 st.markdown(
     "Drop a mesh. Get the defect list, the checks that could not run, and the "
     "raw certificate. Free, no account, your file is never stored.\n\n"
-    "This is **Topoheal** — geometry inspection and non-destructive repair for "
+    "This is **Topoheal**, geometry inspection and non-destructive repair for "
     "`.glb` `.gltf` `.obj` `.ply` `.stl`, the same engine that ships as the "
     "`3dqa` package. [topoheal.com](https://topoheal.com) · "
     "[the full census](https://topoheal.com/census/)\n\n"
