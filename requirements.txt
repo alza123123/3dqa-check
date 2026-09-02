@@ -18,7 +18,7 @@
 #
 # When PyPI is recovered, upload the identical wheel and swap this for
 # `3dqa==1.1.0`. The Release then becomes a mirror, not a fork.
-3dqa @ https://github.com/alza123123/3dqa-benchmark/releases/download/v1.1.0/3dqa-1.1.0-py3-none-any.whl
+3dqa @ https://github.com/topoheal/3dqa-benchmark/releases/download/v1.1.0/3dqa-1.1.0-py3-none-any.whl
 
 streamlit==1.62.0
 

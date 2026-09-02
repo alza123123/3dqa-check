@@ -31,7 +31,10 @@ from __future__ import annotations
 import csv
 import json
 import time
+from datetime import datetime, timezone
+import threading
 import traceback
+import urllib.request
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -228,12 +231,82 @@ than it says.
 #    distinct asset linted by one server process, not one upload click. The
 #    cache holds 8 entries and dies with the process, so the undercount is
 #    small and always in the conservative direction. Read the total as a floor.
+def _is_self_test() -> bool:
+    """True when the operator appended ?self=1 to the URL.
+
+    ⛔ This exists because the log had NO way to tell an operator test from a
+    stranger's run, so every self-test silently inflated R. It is a query
+    parameter the operator types, NOT anything read from the visitor: no IP, no
+    session id, no fingerprint. The footer promises "nothing that identifies
+    you" and a counter is not a reason to weaken that.
+    """
+    try:
+        return str(st.query_params.get("self", "")) in ("1", "true", "yes")
+    except Exception:
+        return False
+
+
+# ⛔ WHY A SECOND DESTINATION EXISTS, and it is not redundancy.
+# The RUN line above goes to this container's stdout. Streamlit Cloud CLEARS
+# that buffer every time the container restarts, and the container restarts on
+# every hibernation - which is every 12 hours without traffic. So with low
+# traffic the buffer resets faster than runs accumulate, and `R` read
+# approximately zero forever no matter how many people used the demo. It was
+# never an unread number. It was an unmeasurable one, for four weeks, and
+# nobody noticed because "go read R" kept being written down as a task.
+#
+# This posts the SAME event to the counter already proven on topoheal.com:
+# functions/e/[label].js, allow-listed, writing to Workers Analytics Engine.
+# It survives restarts. No new service, no new account, no new dependency.
+#
+# ⛔ THE PAYLOAD IS THE LABEL AND NOTHING ELSE - no filename, no bytes, no hash,
+# no size, no verdict, no IP, no session id. Less than the log line carries.
+# The request is made by the SERVER, so the visitor's address never touches it.
+# ⛔ If you are ever tempted to add a field, change the page copy in the SAME
+# commit or do not add it. That rule is what the whole footer rests on.
+_COUNT_ENDPOINT = "https://topoheal.com/e/"
+
+
+def _count_run(self_test: bool) -> None:
+    """Fire-and-forget tick so a completed run outlives this container.
+
+    ⛔ Daemon thread with a short timeout, and every failure swallowed. A
+    counter must never add latency to a lint and must never break one. If
+    topoheal.com is down, the run still completes and the log line still
+    prints - counting is worth less than the thing being counted.
+    """
+    label = "app-selftest" if self_test else "app-run"
+
+    def _send() -> None:
+        try:
+            req = urllib.request.Request(
+                _COUNT_ENDPOINT + label, data=b"", method="POST"
+            )
+            req.add_header("User-Agent", "topoheal-app/1 (+https://topoheal.com)")
+            urllib.request.urlopen(req, timeout=3).close()
+        except Exception:
+            pass
+
+    try:
+        threading.Thread(target=_send, daemon=True).start()
+    except Exception:
+        pass
+
+
 def _emit_run(verdict: str, suffix: str, faces, ms) -> None:
-    """One line per completed run, to the app log. See the block above."""
+    """One line per completed run, to the app log AND to the durable counter.
+
+    ⛔ Every field here is named in the app footer. Add one and the footer
+    changes in the SAME commit, or the change does not ship.
+    """
+    self_test = _is_self_test()
+    _count_run(self_test)
     print(
-        f"RUN verdict={verdict} suffix={suffix or 'none'} "
+        f"RUN ts={datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')} "
+        f"verdict={verdict} suffix={suffix or 'none'} "
         f"faces={'na' if faces is None else faces} "
-        f"ms={'na' if ms is None else round(ms)}",
+        f"ms={'na' if ms is None else round(ms)}"
+        f"{' self=1' if self_test else ''}",
         flush=True,
     )
 
@@ -489,13 +562,33 @@ than the ones that do not.
 
 # ------------------------------------------------------------------- the page
 
-st.set_page_config(page_title="3D asset geometry check", page_icon="🔍",
-                   layout="wide")
+# ⛔ THIS APP IS AN INDEXED PUBLIC SURFACE, not just a demo host. Streamlit's
+# own docs: public Community Cloud apps "are automatically indexed by search
+# engines like Google and Bing on a weekly basis." Until 2026-09-01 it carried
+# NO brand and NO link back to topoheal.com, so it was an orphan: a second
+# public page about mesh geometry that a reader — or an answer engine — had no
+# way to connect to the site, the census or the package.
+#   * page_title carries the wordmark FIRST. It is what shows in the search
+#     result and the browser tab.
+#   * The brand line sits directly under the title on purpose. Streamlit's
+#     indexability docs say engines favour the content of st.header/st.text
+#     over st.title when deciding what the page is about.
+#   * "Topoheal ... ships as the `3dqa` package" is the entity link. The brand
+#     and the installable name never co-occurred anywhere a crawler could read,
+#     so nothing could tie the census to the thing you install.
+# ⛔ No number here. Every rate on this page is read from the engine at runtime;
+# a figure typed into the header would be a figure nobody re-checks.
+st.set_page_config(page_title="Topoheal — 3D asset geometry check",
+                   page_icon="🔍", layout="wide")
 
 st.title("3D asset geometry check")
 st.markdown(
     "Drop a mesh. Get the defect list, the checks that could not run, and the "
     "raw certificate. Free, no account, your file is never stored.\n\n"
+    "This is **Topoheal** — geometry inspection and non-destructive repair for "
+    "`.glb` `.gltf` `.obj` `.ply` `.stl`, the same engine that ships as the "
+    "`3dqa` package. [topoheal.com](https://topoheal.com) · "
+    "[the full census](https://topoheal.com/census/)\n\n"
     "*Same engine, same thresholds, as the census in the second tab.*")
 
 tab_check, tab_census, tab_limits = st.tabs(
@@ -514,8 +607,12 @@ with tab_check:
             "that is a finding and we want it.")
         st.caption(
             "**What we keep.** Not your file. One line per run in the "
-            "server log: verdict, file extension, face count, "
-            "milliseconds. That is the whole record, and it exists so we "
+            "server log: a timestamp, the verdict, the file extension, "
+            "the face count, and how many milliseconds it took. Plus one "
+            "anonymous tick sent to topoheal.com, so the count survives "
+            "this server restarting - that tick carries the single word "
+            "\"run\" and nothing else, not even the verdict. That is the "
+            "whole record. Nothing identifies you, and it exists so we "
             "know whether anyone is using this.")
     with right:
         if up is None:
@@ -563,3 +660,9 @@ with tab_census:
 
 with tab_limits:
     st.markdown(LIMITS)
+
+st.divider()
+st.caption(
+    "Topoheal · [topoheal.com](https://topoheal.com) · "
+    "[the census](https://topoheal.com/census/) · "
+    "install the CLI: `pip install 3dqa`")
